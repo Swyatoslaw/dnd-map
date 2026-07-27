@@ -81,8 +81,17 @@
         <button class="danger" id="clear-btn">Начать заново</button>
     </div>
 
+    <h4 style="margin-bottom: 8px;">1. Картинка карты:</h4>
     <div class="controls-group">
-        <label>1. Картинка карты: <input type="file" id="map-input" accept="image/*"></label>
+        <label>Файл: <input type="file" id="map-input" accept="image/*"></label>
+        <span style="color:#a1a1aa;">или</span>
+        <input type="text" id="map-url" placeholder="URL картинки (https://...)" style="width: 280px;">
+        <button class="secondary" id="map-url-btn">Загрузить по ссылке</button>
+        <button class="secondary" id="map-clear-btn" title="Убрать карту">✕</button>
+    </div>
+    <div id="map-note" style="display:none; margin-top:8px; font-size:13px;"></div>
+
+    <div class="controls-group" style="margin-top: 12px;">
         <button class="secondary" id="copy-all-btn">📋 Скопировать ссылки для ВСЕХ</button>
         <button class="danger" id="recreate-room-btn" title="Создать новую комнату, сохранив карту, аватарки и позиции">🔄 Пересоздать комнату</button>
     </div>
@@ -216,8 +225,34 @@
 
     function saveAndBroadcast() {
         if (!isHost) return;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId, gameState }));
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId, gameState }));
+        } catch (e) {
+            // Картинка из файла хранится как DataURL и может не влезть в localStorage
+            console.warn('Не удалось сохранить игру:', e);
+            showMapNote(
+                'Игра не сохранилась локально — картинка слишком большая. ' +
+                'Загрузите карту по ссылке вместо файла.',
+                '#fbbf24'
+            );
+        }
         sendState(gameState); // Отправка всем
+    }
+
+    // --- ФОН КАРТЫ: файл или прямая ссылка ---
+
+    const mapNote = document.getElementById('map-note');
+
+    function showMapNote(text, color = '#a1a1aa') {
+        mapNote.style.display = text ? 'block' : 'none';
+        mapNote.style.color = color;
+        mapNote.innerText = text;
+    }
+
+    function setBackground(src) {
+        gameState.bgImage = src;
+        saveAndBroadcast();
+        renderBoard();
     }
 
     document.getElementById('map-input').addEventListener('change', (e) => {
@@ -225,11 +260,45 @@
         if (!file) return;
         const reader = new FileReader();
         reader.onload = (event) => {
-            gameState.bgImage = event.target.result;
-            saveAndBroadcast();
-            renderBoard();
+            document.getElementById('map-url').value = '';
+            setBackground(event.target.result);
+            showMapNote(`Карта загружена из файла: ${file.name}`);
         };
+        reader.onerror = () => showMapNote('Не удалось прочитать файл.', '#f87171');
         reader.readAsDataURL(file);
+    });
+
+    function applyMapUrl() {
+        const url = document.getElementById('map-url').value.trim();
+        if (!url) return;
+
+        showMapNote('Проверяем ссылку...');
+
+        // Сначала убеждаемся, что картинка вообще грузится — иначе разошлем игрокам битую ссылку
+        const probe = new Image();
+        probe.onload = () => {
+            document.getElementById('map-input').value = '';
+            setBackground(url);
+            showMapNote(`Карта загружена по ссылке (${probe.naturalWidth}×${probe.naturalHeight}).`);
+        };
+        probe.onerror = () => showMapNote(
+            'Картинка по этой ссылке не загрузилась. Нужна прямая ссылка на файл (.jpg/.png/.webp), ' +
+            'доступная всем игрокам — страница с картинкой не подойдет.',
+            '#f87171'
+        );
+        probe.src = url;
+    }
+
+    document.getElementById('map-url-btn').addEventListener('click', applyMapUrl);
+    document.getElementById('map-url').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') applyMapUrl();
+    });
+
+    document.getElementById('map-clear-btn').addEventListener('click', () => {
+        document.getElementById('map-url').value = '';
+        document.getElementById('map-input').value = '';
+        setBackground(null);
+        showMapNote('');
     });
 
     document.getElementById('add-player-btn').addEventListener('click', () => {
@@ -307,6 +376,10 @@
             connectToRoom(saved.roomId);
             window.location.hash = hostHash(roomId);
             document.getElementById('restore-banner').style.display = 'none';
+            // Если карта была задана ссылкой — показываем её в поле, чтобы можно было поправить
+            if (gameState.bgImage && !gameState.bgImage.startsWith('data:')) {
+                document.getElementById('map-url').value = gameState.bgImage;
+            }
             renderHostPlayerList();
             renderBoard();
             sendState(gameState);
@@ -450,9 +523,13 @@
 
     // --- РЕНДЕРИНГ И ДВИЖЕНИЕ ---
 
+    // Экранирование для подстановки в css url("...")
+    const cssUrl = (src) => String(src).replace(/["\\]/g, '\\$&');
+
     function renderBoard() {
         const board = document.getElementById('board');
-        board.style.backgroundImage = gameState.bgImage ? `url(${gameState.bgImage})` : 'none';
+        // Кавычки обязательны: в обычных URL бывают скобки и пробелы, которые ломают css url(...)
+        board.style.backgroundImage = gameState.bgImage ? `url("${cssUrl(gameState.bgImage)}")` : 'none';
 
         if (gameState.bgImage) {
             const img = new Image();
@@ -461,6 +538,9 @@
                 board.style.width = img.width + 'px';
                 board.style.height = img.height + 'px';
             };
+        } else {
+            board.style.width = '';
+            board.style.height = '';
         }
 
         board.innerHTML = '';
@@ -470,7 +550,7 @@
             token.className = 'token';
 
             if (pos.avatar) {
-                token.style.backgroundImage = `url(${pos.avatar})`;
+                token.style.backgroundImage = `url("${cssUrl(pos.avatar)}")`;
                 token.innerText = '';
             } else {
                 token.innerText = name.substring(0, 2).toUpperCase();

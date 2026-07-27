@@ -72,8 +72,16 @@ paste into a group chat.
 ## Features
 
 ### Host (GM)
-- Load a local map image (`<input type="file">` → `FileReader` → DataURL,
-  stored in `gameState.bgImage`).
+- Set the map background two ways, both stored in `gameState.bgImage`:
+  - **local file** (`<input type="file">` → `FileReader` → DataURL), or
+  - **direct image URL** pasted into the URL field (Enter or "Загрузить по
+    ссылке"). The URL is probed with an `Image()` first and rejected if it
+    doesn't load; the URL itself is synced to peers, so it must be publicly
+    reachable for every player.
+  - `✕` clears the background.
+  - A DataURL from a large file can exceed the `localStorage` quota — the save
+    failure is caught and the host is told to use a URL instead. The map still
+    works for the current session.
 - Add players (name + optional avatar URL). Each player becomes a token.
 - Generate per-player links; "copy all links" button.
 - Autosave the full session (map, tokens, avatars) to `localStorage` and a
