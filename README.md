@@ -86,7 +86,13 @@ list), **3. Комната** (recreate). The restore banner sits above them all.
   - A DataURL from a large file can exceed the `localStorage` quota — the save
     failure is caught and the host is told to use a URL instead. The map still
     works for the current session.
-- Add players (name + optional avatar URL). Each player becomes a token.
+- Add players (name + optional avatar). Each player becomes a token. The avatar
+  can be a pasted URL **or** a local file (`📁` → `FileReader` → DataURL); a
+  typed URL wins over a previously picked file.
+- Player rows are left-aligned: a fixed-width name column, then the avatar
+  field ("Ссылка на аватарку"), `📁`, "Ссылка для входа" (copies the player's
+  invite link) and delete. A file-based avatar shows the placeholder
+  "Аватарка из файла" instead of the huge DataURL.
 - Generate per-player links; "copy all links" button.
 - Autosave the full session (map, tokens, avatars) to `localStorage` and a
   **restore banner** to resume a previous game on reload (rejoins the saved

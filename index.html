@@ -27,6 +27,17 @@
         }
 
         .player-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; background: #18181b; padding: 8px; border-radius: 6px; }
+        /* Имя занимает фиксированную ширину, дальше все идет подряд слева */
+        .player-row .player-name { width: 140px; flex: none; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Кнопка выбора файла: label поверх скрытого input[type=file] */
+        .file-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 6px 10px; border-radius: 4px; background: #3f3f46;
+            cursor: pointer; user-select: none; line-height: 1;
+        }
+        .file-btn:hover { background: #52525b; }
+        .file-btn input[type="file"] { display: none; }
 
         /* Смысловые группы настроек ведущего */
         .section { background: #1f1f23; border: 1px solid #3f3f46; border-radius: 8px; padding: 14px; margin-top: 12px; }
@@ -148,7 +159,9 @@
         <div id="players-list"></div>
         <div class="controls-group" style="margin-top: 12px;">
             <input type="text" id="new-player-name" placeholder="Имя игрока">
-            <input type="text" id="new-player-avatar" placeholder="URL аватарки">
+            <input type="text" id="new-player-avatar" placeholder="Ссылка на аватарку">
+            <label class="file-btn" title="Выбрать файл аватарки">📁<input type="file" accept="image/*" id="new-player-avatar-file"></label>
+            <span id="new-player-avatar-note" style="color:#a1a1aa; font-size:13px;"></span>
             <button id="add-player-btn">Добавить игрока</button>
         </div>
     </section>
@@ -322,6 +335,15 @@
         sendState(gameState); // Отправка всем
     }
 
+    // Чтение выбранной картинки (карта или аватарка) в DataURL
+    function readImageFile(file, onDone, onError = (msg) => alert(msg)) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => onDone(event.target.result);
+        reader.onerror = () => onError('Не удалось прочитать файл.');
+        reader.readAsDataURL(file);
+    }
+
     // --- ФОН КАРТЫ: файл или прямая ссылка ---
 
     const mapNote = document.getElementById('map-note');
@@ -340,15 +362,11 @@
 
     document.getElementById('map-input').addEventListener('change', (e) => {
         const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
+        readImageFile(file, (dataUrl) => {
             document.getElementById('map-url').value = '';
-            setBackground(event.target.result);
+            setBackground(dataUrl);
             showMapNote(`Карта загружена из файла: ${file.name}`);
-        };
-        reader.onerror = () => showMapNote('Не удалось прочитать файл.', '#f87171');
-        reader.readAsDataURL(file);
+        }, (msg) => showMapNote(msg, '#f87171'));
     });
 
     function applyMapUrl() {
@@ -384,11 +402,25 @@
         showMapNote('');
     });
 
+    // Аватарка нового игрока, выбранная файлом (URL вводится в соседнее поле)
+    let newPlayerAvatarFile = null;
+    const newAvatarNote = document.getElementById('new-player-avatar-note');
+
+    document.getElementById('new-player-avatar-file').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        readImageFile(file, (dataUrl) => {
+            newPlayerAvatarFile = dataUrl;
+            document.getElementById('new-player-avatar').value = '';
+            newAvatarNote.innerText = `файл: ${file.name}`;
+        });
+    });
+
     document.getElementById('add-player-btn').addEventListener('click', () => {
         const nameInput = document.getElementById('new-player-name');
         const avatarInput = document.getElementById('new-player-avatar');
         const name = nameInput.value.trim();
-        const avatar = avatarInput.value.trim();
+        // Введенный URL важнее ранее выбранного файла
+        const avatar = avatarInput.value.trim() || newPlayerAvatarFile;
 
         if (!name || gameState.tokens[name]) return;
 
@@ -403,6 +435,9 @@
 
         nameInput.value = '';
         avatarInput.value = '';
+        document.getElementById('new-player-avatar-file').value = '';
+        newPlayerAvatarFile = null;
+        newAvatarNote.innerText = '';
 
         renderHostPlayerList();
         saveAndBroadcast();
@@ -488,9 +523,9 @@
 
             div.innerHTML = `
           <strong class="player-name"></strong>
-          <input type="text" placeholder="URL аватарки" class="avatar-edit" style="width: 200px;">
+          <input type="text" placeholder="Ссылка на аватарку" class="avatar-edit" style="width: 220px;">
           <label class="file-btn" title="Выбрать файл аватарки">📁<input type="file" accept="image/*" class="avatar-file"></label>
-          <button class="secondary copy-single-btn">Ссылка</button>
+          <button class="secondary copy-single-btn">Ссылка для входа</button>
           <button class="danger delete-btn">✕</button>
         `;
 
