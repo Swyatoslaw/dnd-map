@@ -1,4 +1,4 @@
-<!--version 1.2-->
+<!--version 1.3-->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -84,7 +84,10 @@
     <div class="controls-group">
         <label>1. Картинка карты: <input type="file" id="map-input" accept="image/*"></label>
         <button class="secondary" id="copy-all-btn">📋 Скопировать ссылки для ВСЕХ</button>
+        <button class="danger" id="recreate-room-btn" title="Создать новую комнату, сохранив карту, аватарки и позиции">🔄 Пересоздать комнату</button>
     </div>
+
+    <div id="recreate-note" style="display:none; background:#3f3f46; padding:10px; border-radius:6px; margin-top:12px;"></div>
 
     <h4 style="margin-bottom: 8px;">2. Игроки и аватарки:</h4>
     <div id="players-list"></div>
@@ -120,7 +123,12 @@
     const urlParams = new URLSearchParams(window.location.hash.substring(1));
     let roomId = urlParams.get('room');
     let myPlayerName = urlParams.get('player');
-    let isHost = !roomId;
+    // host=1 в хеше — чтобы после перезагрузки страницы ведущий остался ведущим
+    let isHost = !roomId || urlParams.get('host') === '1';
+
+    const newRoomId = () => 'room-' + Math.random().toString(36).substring(2, 9);
+    // У ведущего в адресе есть метка host=1, у игроков — их имя
+    const hostHash = (id) => `room=${id}&host=1`;
 
     let gameState = {
         bgImage: null,
@@ -137,9 +145,9 @@
         }
 
         if (!roomId) {
-            roomId = 'room-' + Math.random().toString(36).substring(2, 9);
-            window.location.hash = `room=${roomId}`;
+            roomId = newRoomId();
         }
+        window.location.hash = hostHash(roomId);
     } else {
         document.getElementById('client-controls').style.display = 'block';
         document.getElementById('status').innerText = `Комната: ${roomId} | Вы зашли как: ${myPlayerName}`;
@@ -147,30 +155,28 @@
 
     // Подключаемся к P2P комнате Trystero
     const config = { appId: 'vtt-tabletop-map-app' };
-    const room = joinRoom(config, roomId);
 
-    // Создаем каналы передачи данных
-    const [sendState, getState] = room.makeAction('state');
-    const [sendMove, getMove] = room.makeAction('move');
+    // room и каналы пересоздаются при переподключении, поэтому не const
+    let room = null;
+    let sendState = () => {};
+    let sendMove = () => {};
 
-    // Реакция на подключение нового пира
-    room.onPeerJoin(peerId => {
+    function handlePeerJoin(peerId) {
         console.log('Подключился новый участник:', peerId);
         if (isHost) {
             // Хост отправляет свежее состояние игры новому игроку
             sendState(gameState, peerId);
         }
-    });
+    }
 
-    // Обработка входящих данных
-    getState((receivedState) => {
+    function handleState(receivedState) {
         if (!isHost) {
             gameState = receivedState;
             renderBoard();
         }
-    });
+    }
 
-    getMove((moveData) => {
+    function handleMove(moveData) {
         if (gameState.tokens[moveData.name]) {
             gameState.tokens[moveData.name].x = moveData.x;
             gameState.tokens[moveData.name].y = moveData.y;
@@ -180,7 +186,31 @@
                 saveAndBroadcast();
             }
         }
-    });
+    }
+
+    // Вход в комнату: отключаемся от старой (если была) и создаем каналы заново
+    function connectToRoom(id) {
+        if (room) {
+            try { room.leave(); } catch (e) { console.warn('Не удалось покинуть комнату:', e); }
+        }
+
+        roomId = id;
+        room = joinRoom(config, roomId);
+
+        // Создаем каналы передачи данных
+        let getState, getMove;
+        [sendState, getState] = room.makeAction('state');
+        [sendMove, getMove] = room.makeAction('move');
+
+        // Реакция на подключение нового пира
+        room.onPeerJoin(handlePeerJoin);
+
+        // Обработка входящих данных
+        getState(handleState);
+        getMove(handleMove);
+    }
+
+    connectToRoom(roomId);
 
     // --- ФУНКЦИИ ХОСТА ---
 
@@ -224,25 +254,58 @@
         renderBoard();
     });
 
-    document.getElementById('copy-all-btn').addEventListener('click', () => {
-        const players = Object.keys(gameState.tokens);
-        if (players.length === 0) return alert('Добавьте игроков!');
+    const playerLink = (name) =>
+        `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
 
+    function buildAllLinksText() {
         let text = `🎲 Ссылки для входа на карту:\n\n`;
-        players.forEach(name => {
-            const link = `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
-            text += `👤 ${name}: ${link}\n`;
+        Object.keys(gameState.tokens).forEach(name => {
+            text += `👤 ${name}: ${playerLink(name)}\n`;
         });
+        return text;
+    }
 
-        navigator.clipboard.writeText(text).then(() => alert('Все ссылки скопированы!'));
+    document.getElementById('copy-all-btn').addEventListener('click', () => {
+        if (Object.keys(gameState.tokens).length === 0) return alert('Добавьте игроков!');
+        navigator.clipboard.writeText(buildAllLinksText()).then(() => alert('Все ссылки скопированы!'));
+    });
+
+    // Пересоздание комнаты: новая P2P-комната, данные игры (карта, аватарки, позиции) сохраняются
+    document.getElementById('recreate-room-btn')?.addEventListener('click', () => {
+        const ok = confirm(
+            'Создать новую комнату?\n\n' +
+            'Карта, аватарки и позиции фишек сохранятся, но у комнаты будет новый адрес — ' +
+            'игрокам нужно будет отправить новые ссылки.'
+        );
+        if (!ok) return;
+
+        connectToRoom(newRoomId());
+        window.location.hash = hostHash(roomId);
+
+        // Новый roomId нужно сохранить и отразить в ссылках
+        saveAndBroadcast();
+        renderHostPlayerList();
+        renderBoard();
+
+        const note = document.getElementById('recreate-note');
+        note.style.display = 'block';
+        note.innerHTML = `✅ Создана новая комната <strong>${roomId}</strong>. Отправьте игрокам новые ссылки — старые больше не работают.`;
+
+        const players = Object.keys(gameState.tokens);
+        if (players.length > 0) {
+            navigator.clipboard.writeText(buildAllLinksText())
+                .then(() => { note.innerHTML += ' Новые ссылки уже скопированы в буфер обмена.'; })
+                .catch(() => {});
+        }
     });
 
     document.getElementById('restore-btn')?.addEventListener('click', () => {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
         if (saved) {
-            roomId = saved.roomId;
             gameState = saved.gameState;
-            window.location.hash = `room=${roomId}`;
+            // Подключаемся именно к сохраненной комнате, чтобы старые ссылки игроков работали
+            connectToRoom(saved.roomId);
+            window.location.hash = hostHash(roomId);
             document.getElementById('restore-banner').style.display = 'none';
             renderHostPlayerList();
             renderBoard();
@@ -262,7 +325,7 @@
         Object.entries(gameState.tokens).forEach(([name, tokenData]) => {
             const div = document.createElement('div');
             div.className = 'player-row';
-            const link = `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
+            const link = playerLink(name);
 
             div.innerHTML = `
           <strong>${name}</strong>
