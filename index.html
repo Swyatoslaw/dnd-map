@@ -54,6 +54,22 @@
             width: 42px; height: 42px; font-size: 20px; line-height: 1;
             display: flex; align-items: center; justify-content: center; padding: 0;
         }
+        /* Кнопка показа/скрытия панели ведущего */
+        #toggle-panel-btn {
+            position: fixed; top: 16px; left: 16px; z-index: 60;
+            width: 42px; height: 42px; padding: 0; font-size: 20px; line-height: 1;
+            display: none; align-items: center; justify-content: center;
+            background: rgba(39,39,42,0.9); border: 1px solid #3f3f46;
+            backdrop-filter: blur(4px);
+        }
+        #toggle-panel-btn:hover { background: #3f3f46; }
+        /* Место под кнопку, чтобы она не наезжала на заголовок панели */
+        #host-controls { padding-left: 70px; }
+
+        /* Панель скрыта — карта занимает весь экран */
+        body.panel-hidden { padding: 8px; }
+        body.panel-hidden #board-wrap { height: calc(100vh - 16px); }
+
         #zoom-level {
             min-width: 52px; display: flex; align-items: center; justify-content: center;
             font-size: 13px; color: #a1a1aa;
@@ -70,6 +86,9 @@
     </script>
 </head>
 <body>
+
+<!-- Кнопка показа/скрытия панели (только у ведущего) -->
+<button id="toggle-panel-btn" class="secondary" title="Скрыть панель">⚙</button>
 
 <!-- Панель Ведущего -->
 <div id="host-controls" class="panel" style="display: none;">
@@ -128,6 +147,7 @@
     import { joinRoom } from 'trystero';
 
     const STORAGE_KEY = 'p2p_tabletop_trystero';
+    const PANEL_KEY = 'p2p_tabletop_panel_hidden';
 
     const urlParams = new URLSearchParams(window.location.hash.substring(1));
     let roomId = urlParams.get('room');
@@ -144,13 +164,30 @@
         tokens: {}
     };
 
+    // Панель ведущего: показать/скрыть. Скрытая панель освобождает весь экран под карту
+    const toggleBtn = document.getElementById('toggle-panel-btn');
+
+    function setPanelHidden(hidden) {
+        document.getElementById('host-controls').style.display = hidden ? 'none' : 'block';
+        document.body.classList.toggle('panel-hidden', hidden);
+        toggleBtn.innerText = hidden ? '⚙' : '✕';
+        toggleBtn.title = hidden ? 'Показать панель' : 'Скрыть панель';
+        localStorage.setItem(PANEL_KEY, hidden ? '1' : '0');
+    }
+
     // 1. Инициализация комнаты
     if (isHost) {
-        document.getElementById('host-controls').style.display = 'block';
+        toggleBtn.style.display = 'flex';
+        toggleBtn.addEventListener('click', () => {
+            setPanelHidden(!document.body.classList.contains('panel-hidden'));
+        });
+        setPanelHidden(localStorage.getItem(PANEL_KEY) === '1');
 
         const savedData = localStorage.getItem(STORAGE_KEY);
         if (savedData) {
             document.getElementById('restore-banner').style.display = 'block';
+            // Панель нужна сразу: в ней лежит предложение возобновить прошлую игру
+            setPanelHidden(false);
         }
 
         if (!roomId) {

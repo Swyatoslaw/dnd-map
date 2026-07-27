@@ -94,6 +94,14 @@ paste into a group chat.
   the old links stop working, so they must be re-sent.
 - Can drag **any** token.
 
+- **Show/hide the host panel** — a fixed button in the top-left corner
+  (`⚙` when hidden, `✕` when shown). With the panel hidden the page is just the
+  map: `body.panel-hidden` drops the body padding and stretches `#board-wrap`
+  to the full viewport height. The choice is remembered in `localStorage`
+  (`p2p_tabletop_panel_hidden`), except that the panel is force-opened on load
+  when a saved game exists, so the restore banner isn't missed. Players never
+  see the button.
+
 ### Player
 - Sees the current map + all tokens in real time.
 - Can drag **only their own** token (the one whose name matches `player` in the
