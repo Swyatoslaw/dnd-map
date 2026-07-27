@@ -3,6 +3,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <title>P2P Tabletop Map (Trystero)</title>
     <style>
         * { box-sizing: border-box; font-family: system-ui, sans-serif; }
@@ -12,7 +13,7 @@
 
         .token {
             position: absolute; width: 60px; height: 60px; border-radius: 50%;
-            border: 3px solid #60a5fa; cursor: grab; user-select: none;
+            border: 3px solid #60a5fa; cursor: grab; user-select: none; touch-action: none;
             display: flex; align-items: center; justify-content: center;
             background: #3b82f6; font-weight: bold; font-size: 14px;
             box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); background-size: cover; background-position: center;
@@ -311,16 +312,20 @@
         let isDragging = false;
         let startX, startY, initialLeft, initialTop;
 
-        element.addEventListener('mousedown', (e) => {
+        // Pointer Events объединяют мышь и тач — работают и на десктопе, и на мобильных
+        element.addEventListener('pointerdown', (e) => {
             isDragging = true;
             startX = e.clientX;
             startY = e.clientY;
             initialLeft = element.offsetLeft;
             initialTop = element.offsetTop;
             element.style.cursor = 'grabbing';
+            // Захватываем указатель, чтобы движение отслеживалось даже за пределами фишки
+            element.setPointerCapture(e.pointerId);
+            e.preventDefault();
         });
 
-        document.addEventListener('mousemove', (e) => {
+        element.addEventListener('pointermove', (e) => {
             if (!isDragging) return;
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
@@ -335,10 +340,13 @@
             gameState.tokens[playerName].y = newY;
         });
 
-        document.addEventListener('mouseup', () => {
+        const endDrag = (e) => {
             if (!isDragging) return;
             isDragging = false;
             element.style.cursor = 'grab';
+            if (e && e.pointerId != null && element.hasPointerCapture(e.pointerId)) {
+                element.releasePointerCapture(e.pointerId);
+            }
 
             // Отправляем перемещение
             sendMove({
@@ -350,7 +358,10 @@
             if (isHost) {
                 saveAndBroadcast();
             }
-        });
+        };
+
+        element.addEventListener('pointerup', endDrag);
+        element.addEventListener('pointercancel', endDrag);
     }
 </script>
 </body>
