@@ -94,18 +94,26 @@ paste into a group chat.
   the old links stop working, so they must be re-sent.
 - Can drag **any** token.
 
-- **Show/hide the host panel** — a fixed button in the top-left corner
-  (`⚙` when hidden, `✕` when shown). With the panel hidden the page is just the
-  map: `body.panel-hidden` drops the body padding and stretches `#board-wrap`
-  to the full viewport height. The choice is remembered in `localStorage`
-  (`p2p_tabletop_panel_hidden`), except that the panel is force-opened on load
-  when a saved game exists, so the restore banner isn't missed. Players never
-  see the button.
+- Panel can be hidden — see **Show/hide panel** below. It is force-opened on
+  load when a saved game exists, so the restore banner isn't missed.
 
 ### Player
 - Sees the current map + all tokens in real time.
 - Can drag **only their own** token (the one whose name matches `player` in the
   URL). Other tokens are shown `.disabled`.
+- Compact one-line header (`Комната: … | Вы: …`) instead of a full panel, and
+  it can be hidden too.
+- `body.role-player` makes the page a flex column of `100vh`, so `#board-wrap`
+  fills everything left over after the body padding and the header — the map is
+  effectively full-screen at all times.
+
+### Show/hide panel (both roles)
+- Fixed button in the top-left corner: `⚙` when hidden, `✕` when shown. It
+  toggles the panel belonging to the current role (host panel / player header).
+- `body.panel-hidden` drops the body padding to 8px; for the host it also
+  stretches `#board-wrap` to the full viewport height (the player layout
+  already fills it via flex).
+- The choice is remembered in `localStorage` (`p2p_tabletop_panel_hidden`).
 
 ### Token bounds
 - Tokens are clamped to the board while dragging: `x` in `[0, boardWidth - 60]`,

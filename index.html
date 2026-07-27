@@ -54,7 +54,7 @@
             width: 42px; height: 42px; font-size: 20px; line-height: 1;
             display: flex; align-items: center; justify-content: center; padding: 0;
         }
-        /* Кнопка показа/скрытия панели ведущего */
+        /* Кнопка показа/скрытия панели (у ведущего и у игрока) */
         #toggle-panel-btn {
             position: fixed; top: 16px; left: 16px; z-index: 60;
             width: 42px; height: 42px; padding: 0; font-size: 20px; line-height: 1;
@@ -63,12 +63,21 @@
             backdrop-filter: blur(4px);
         }
         #toggle-panel-btn:hover { background: #3f3f46; }
-        /* Место под кнопку, чтобы она не наезжала на заголовок панели */
-        #host-controls { padding-left: 70px; }
+        /* Место под кнопку, чтобы она не наезжала на содержимое панели */
+        #host-controls, #client-controls { padding-left: 70px; }
+
+        /* Компактная шапка игрока */
+        #client-controls { padding-top: 8px; padding-bottom: 8px; padding-right: 12px; }
+        #status { margin: 0; font-size: 13px; font-weight: 500; color: #a1a1aa; }
+
+        /* У игрока карта занимает всё место, кроме отступов body и шапки */
+        body.role-player { display: flex; flex-direction: column; gap: 12px; height: 100vh; }
+        body.role-player .panel { margin-bottom: 0; }
+        body.role-player #board-wrap { flex: 1 1 auto; height: auto; min-height: 0; }
 
         /* Панель скрыта — карта занимает весь экран */
         body.panel-hidden { padding: 8px; }
-        body.panel-hidden #board-wrap { height: calc(100vh - 16px); }
+        body.panel-hidden:not(.role-player) #board-wrap { height: calc(100vh - 16px); }
 
         #zoom-level {
             min-width: 52px; display: flex; align-items: center; justify-content: center;
@@ -129,7 +138,7 @@
 
 <!-- Статус Игрока -->
 <div id="client-controls" class="panel" style="display: none;">
-    <h3 id="status">Подключение к P2P сети...</h3>
+    <div id="status">Подключение к P2P сети...</div>
 </div>
 
 <div id="board-wrap">
@@ -164,11 +173,13 @@
         tokens: {}
     };
 
-    // Панель ведущего: показать/скрыть. Скрытая панель освобождает весь экран под карту
+    // Показать/скрыть свою панель: у ведущего — настройки, у игрока — шапка со статусом.
+    // Скрытая панель освобождает весь экран под карту
     const toggleBtn = document.getElementById('toggle-panel-btn');
+    const myPanel = document.getElementById(isHost ? 'host-controls' : 'client-controls');
 
     function setPanelHidden(hidden) {
-        document.getElementById('host-controls').style.display = hidden ? 'none' : 'block';
+        myPanel.style.display = hidden ? 'none' : 'block';
         document.body.classList.toggle('panel-hidden', hidden);
         toggleBtn.innerText = hidden ? '⚙' : '✕';
         toggleBtn.title = hidden ? 'Показать панель' : 'Скрыть панель';
@@ -176,18 +187,14 @@
     }
 
     // 1. Инициализация комнаты
-    if (isHost) {
-        toggleBtn.style.display = 'flex';
-        toggleBtn.addEventListener('click', () => {
-            setPanelHidden(!document.body.classList.contains('panel-hidden'));
-        });
-        setPanelHidden(localStorage.getItem(PANEL_KEY) === '1');
+    let keepPanelOpen = false;
 
+    if (isHost) {
         const savedData = localStorage.getItem(STORAGE_KEY);
         if (savedData) {
             document.getElementById('restore-banner').style.display = 'block';
             // Панель нужна сразу: в ней лежит предложение возобновить прошлую игру
-            setPanelHidden(false);
+            keepPanelOpen = true;
         }
 
         if (!roomId) {
@@ -195,9 +202,15 @@
         }
         window.location.hash = hostHash(roomId);
     } else {
-        document.getElementById('client-controls').style.display = 'block';
-        document.getElementById('status').innerText = `Комната: ${roomId} | Вы зашли как: ${myPlayerName}`;
+        document.body.classList.add('role-player');
+        document.getElementById('status').innerText = `Комната: ${roomId} | Вы: ${myPlayerName}`;
     }
+
+    toggleBtn.style.display = 'flex';
+    toggleBtn.addEventListener('click', () => {
+        setPanelHidden(!document.body.classList.contains('panel-hidden'));
+    });
+    setPanelHidden(!keepPanelOpen && localStorage.getItem(PANEL_KEY) === '1');
 
     // Подключаемся к P2P комнате Trystero
     const config = { appId: 'vtt-tabletop-map-app' };
