@@ -108,8 +108,14 @@ paste into a group chat.
   effectively full-screen at all times.
 
 ### Show/hide panel (both roles)
-- Fixed button in the top-left corner: `⚙` when hidden, `✕` when shown. It
-  toggles the panel belonging to the current role (host panel / player header).
+- One button, two placements: while the panel is open it sits **in the flow**,
+  in the panel's own top-left corner (32px, next to "Панель Ведущего" / the
+  player status line); once the panel is hidden it becomes a 42px
+  `position: fixed` button in the page's top-left corner over the map. The
+  button is moved in the DOM (`btnSlot` ↔ `document.body`) and restyled via
+  `body.panel-hidden`.
+- Label: `⚙` when hidden, `✕` when shown. It toggles the panel belonging to the
+  current role (host panel / player header).
 - `body.panel-hidden` drops the body padding to 8px; for the host it also
   stretches `#board-wrap` to the full viewport height (the player layout
   already fills it via flex).

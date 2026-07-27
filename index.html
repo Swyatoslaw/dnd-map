@@ -54,20 +54,27 @@
             width: 42px; height: 42px; font-size: 20px; line-height: 1;
             display: flex; align-items: center; justify-content: center; padding: 0;
         }
-        /* Кнопка показа/скрытия панели (у ведущего и у игрока) */
+        /* Кнопка показа/скрытия панели (у ведущего и у игрока).
+           Панель открыта — кнопка стоит в потоке, в левом верхнем углу панели.
+           Панель скрыта — кнопка висит поверх карты слева сверху. */
         #toggle-panel-btn {
+            width: 32px; height: 32px; padding: 0; font-size: 16px; line-height: 1;
+            flex: none; display: none; align-items: center; justify-content: center;
+        }
+        body.panel-hidden #toggle-panel-btn {
             position: fixed; top: 16px; left: 16px; z-index: 60;
-            width: 42px; height: 42px; padding: 0; font-size: 20px; line-height: 1;
-            display: none; align-items: center; justify-content: center;
+            width: 42px; height: 42px; font-size: 20px;
             background: rgba(39,39,42,0.9); border: 1px solid #3f3f46;
             backdrop-filter: blur(4px);
         }
         #toggle-panel-btn:hover { background: #3f3f46; }
-        /* Место под кнопку, чтобы она не наезжала на содержимое панели */
-        #host-controls, #client-controls { padding-left: 70px; }
 
-        /* Компактная шапка игрока */
-        #client-controls { padding-top: 8px; padding-bottom: 8px; padding-right: 12px; }
+        /* Шапка панели ведущего: кнопка + заголовок в одну строку */
+        #host-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        #host-header h2 { margin: 0; }
+
+        /* Компактная шапка игрока: кнопка + статус в одну строку */
+        #client-controls { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
         #status { margin: 0; font-size: 13px; font-weight: 500; color: #a1a1aa; }
 
         /* У игрока карта занимает всё место, кроме отступов body и шапки */
@@ -96,12 +103,14 @@
 </head>
 <body>
 
-<!-- Кнопка показа/скрытия панели (только у ведущего) -->
+<!-- Кнопка показа/скрытия панели. Когда панель открыта — переезжает в ее левый верхний угол -->
 <button id="toggle-panel-btn" class="secondary" title="Скрыть панель">⚙</button>
 
 <!-- Панель Ведущего -->
 <div id="host-controls" class="panel" style="display: none;">
-    <h2>Панель Ведущего</h2>
+    <div id="host-header">
+        <h2>Панель Ведущего</h2>
+    </div>
 
     <div id="restore-banner" style="display:none; background:#3f3f46; padding:10px; border-radius:6px; margin-bottom:12px;">
         Обнаружена сохраненная игра!
@@ -177,10 +186,15 @@
     // Скрытая панель освобождает весь экран под карту
     const toggleBtn = document.getElementById('toggle-panel-btn');
     const myPanel = document.getElementById(isHost ? 'host-controls' : 'client-controls');
+    // Место кнопки, когда панель открыта
+    const btnSlot = isHost ? document.getElementById('host-header') : myPanel;
 
     function setPanelHidden(hidden) {
-        myPanel.style.display = hidden ? 'none' : 'block';
+        // Пустая строка, а не 'block': у панели игрока своя flex-раскладка из CSS
+        myPanel.style.display = hidden ? 'none' : '';
         document.body.classList.toggle('panel-hidden', hidden);
+        // Панель скрыта — кнопка висит поверх карты, открыта — стоит в углу панели
+        (hidden ? document.body : btnSlot).prepend(toggleBtn);
         toggleBtn.innerText = hidden ? '⚙' : '✕';
         toggleBtn.title = hidden ? 'Показать панель' : 'Скрыть панель';
         localStorage.setItem(PANEL_KEY, hidden ? '1' : '0');
