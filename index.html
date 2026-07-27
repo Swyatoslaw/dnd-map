@@ -1,16 +1,15 @@
+<!--version 1.2-->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>P2P Tabletop Map V2</title>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <title>P2P Tabletop Map (Trystero)</title>
     <style>
         * { box-sizing: border-box; font-family: system-ui, sans-serif; }
         body { margin: 0; padding: 20px; background: #18181b; color: #f4f4f5; }
         .panel { background: #27272a; padding: 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #3f3f46; }
         #board { position: relative; border: 2px dashed #52525b; background-size: contain; background-repeat: no-repeat; display: inline-block; min-width: 500px; min-height: 500px; overflow: hidden; border-radius: 8px; }
 
-        /* Токен (фишка) */
         .token {
             position: absolute; width: 60px; height: 60px; border-radius: 50%;
             border: 3px solid #60a5fa; cursor: grab; user-select: none;
@@ -36,196 +35,128 @@
         button.danger:hover { background: #b91c1c; }
         .controls-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     </style>
+
+    <!-- Импорт Trystero (модуль Nostr) -->
+    <script type="importmap">
+        {
+          "imports": {
+            "trystero": "https://cdn.jsdelivr.net/npm/trystero@0.22.0/nostr.min.js"
+          }
+        }
+    </script>
 </head>
 <body>
 
-<!-- Панель управления Хоста -->
+<!-- Панель Ведущего -->
 <div id="host-controls" class="panel" style="display: none;">
     <h2>Панель Ведущего</h2>
 
     <div id="restore-banner" style="display:none; background:#3f3f46; padding:10px; border-radius:6px; margin-bottom:12px;">
         Обнаружена сохраненная игра!
-        <button onclick="restoreSession()">Возобновить прошлую игру</button>
-        <button class="danger" onclick="clearSavedSession()">Начать заново</button>
+        <button id="restore-btn">Возобновить прошлую игру</button>
+        <button class="danger" id="clear-btn">Начать заново</button>
     </div>
 
     <div class="controls-group">
         <label>1. Картинка карты: <input type="file" id="map-input" accept="image/*"></label>
-        <button class="secondary" onclick="copyAllLinks()">📋 Скопировать ссылки для ВСЕХ</button>
+        <button class="secondary" id="copy-all-btn">📋 Скопировать ссылки для ВСЕХ</button>
     </div>
 
-    <h4 style="margin-bottom: 8px;">2. Игроки и их аватарки:</h4>
+    <h4 style="margin-bottom: 8px;">2. Игроки и аватарки:</h4>
     <div id="players-list"></div>
     <br>
     <div class="controls-group">
         <input type="text" id="new-player-name" placeholder="Имя игрока">
-        <input type="text" id="new-player-avatar" placeholder="URL аватарки (необязательно)">
-        <button onclick="addPlayer()">Добавить игрока</button>
+        <input type="text" id="new-player-avatar" placeholder="URL аватарки">
+        <button id="add-player-btn">Добавить игрока</button>
     </div>
 </div>
 
-<!-- Статус подключения для Игрока -->
+<!-- Статус Игрока -->
 <div id="client-controls" class="panel" style="display: none;">
-    <h3 id="status">Соединение с хостом...</h3>
+    <h3 id="status">Подключение к P2P сети...</h3>
 </div>
 
-<!-- Игровое поле -->
 <div id="board"></div>
 
-<script>
-    let peer = null;
-    let connections = {};
-    let hostConn = null;
-    let isHost = false;
-    let myPlayerName = null;
-    let roomId = null;
+<script type="module">
+    import { joinRoom } from 'trystero';
 
-    const STORAGE_KEY = 'p2p_tabletop_state';
-
-    // Состояние игры
-    let gameState = {
-        bgImage: null,
-        tokens: {} // { "Имя": { x: 100, y: 100, avatar: "URL" } }
-    };
+    const STORAGE_KEY = 'p2p_tabletop_trystero';
 
     const urlParams = new URLSearchParams(window.location.hash.substring(1));
-    roomId = urlParams.get('room');
-    myPlayerName = urlParams.get('player');
+    let roomId = urlParams.get('room');
+    let myPlayerName = urlParams.get('player');
+    let isHost = !roomId;
 
-    // --- ИНИЦИАЛИЗАЦИЯ ---
+    let gameState = {
+        bgImage: null,
+        tokens: {}
+    };
 
-    if (!roomId) {
-        // РЕЖИМ ХОСТА
-        isHost = true;
+    // 1. Инициализация комнаты
+    if (isHost) {
         document.getElementById('host-controls').style.display = 'block';
 
-        // Проверка прошлых сохранений
         const savedData = localStorage.getItem(STORAGE_KEY);
         if (savedData) {
             document.getElementById('restore-banner').style.display = 'block';
         }
 
-        // Если сохранений нет — генерируем новый ID
         if (!roomId) {
             roomId = 'room-' + Math.random().toString(36).substring(2, 9);
             window.location.hash = `room=${roomId}`;
         }
-
-        initHostPeer();
-
     } else {
-        // РЕЖИМ ИГРОКА
         document.getElementById('client-controls').style.display = 'block';
-        // peer = new Peer();
-        peer = new Peer({
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
-            }
-        });
-
-        peer.on('open', () => {
-            hostConn = peer.connect(roomId);
-
-            hostConn.on('open', () => {
-                document.getElementById('status').innerText = `Игра: ${roomId} | Вы зашли как: ${myPlayerName}`;
-                hostConn.send({ type: 'JOIN', name: myPlayerName });
-            });
-
-            hostConn.on('data', data => {
-                if (data.type === 'STATE_UPDATE') {
-                    gameState = data.state;
-                    renderBoard();
-                }
-            });
-
-            hostConn.on('close', () => {
-                document.getElementById('status').innerText = 'Соединение с хостом потеряно!';
-            });
-        });
+        document.getElementById('status').innerText = `Комната: ${roomId} | Вы зашли как: ${myPlayerName}`;
     }
 
-    function initHostPeer() {
-        if (peer) peer.destroy();
-        // peer = new Peer(roomId);
-        peer = new Peer(roomId, {
-            host: 'peerjs-server.herokuapp.com', // или публичные альтернативы
-            secure: true,
-            port: 443,
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]
+    // Подключаемся к P2P комнате Trystero
+    const config = { appId: 'vtt-tabletop-map-app' };
+    const room = joinRoom(config, roomId);
+
+    // Создаем каналы передачи данных
+    const [sendState, getState] = room.makeAction('state');
+    const [sendMove, getMove] = room.makeAction('move');
+
+    // Реакция на подключение нового пира
+    room.onPeerJoin(peerId => {
+        console.log('Подключился новый участник:', peerId);
+        if (isHost) {
+            // Хост отправляет свежее состояние игры новому игроку
+            sendState(gameState, peerId);
+        }
+    });
+
+    // Обработка входящих данных
+    getState((receivedState) => {
+        if (!isHost) {
+            gameState = receivedState;
+            renderBoard();
+        }
+    });
+
+    getMove((moveData) => {
+        if (gameState.tokens[moveData.name]) {
+            gameState.tokens[moveData.name].x = moveData.x;
+            gameState.tokens[moveData.name].y = moveData.y;
+            renderBoard();
+
+            if (isHost) {
+                saveAndBroadcast();
             }
-        });
-
-
-        peer.on('open', id => console.log('Комната готова. ID:', id));
-
-        peer.on('connection', conn => {
-            conn.on('open', () => {
-                conn.on('data', data => {
-                    if (data.type === 'JOIN') {
-                        connections[data.name] = conn;
-                        conn.send({ type: 'STATE_UPDATE', state: gameState });
-                    }
-                    if (data.type === 'MOVE') {
-                        if (gameState.tokens[data.name]) {
-                            gameState.tokens[data.name].x = data.x;
-                            gameState.tokens[data.name].y = data.y;
-                            saveAndBroadcast();
-                            renderBoard();
-                        }
-                    }
-                });
-            });
-        });
-    }
+        }
+    });
 
     // --- ФУНКЦИИ ХОСТА ---
 
-    // Восстановление прошлых данных из LocalStorage
-    function restoreSession() {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-        if (saved) {
-            roomId = saved.roomId;
-            gameState = saved.gameState;
-            window.location.hash = `room=${roomId}`;
-
-            document.getElementById('restore-banner').style.display = 'none';
-            initHostPeer();
-            renderHostPlayerList();
-            renderBoard();
-        }
-    }
-
-    function clearSavedSession() {
-        localStorage.removeItem(STORAGE_KEY);
-        document.getElementById('restore-banner').style.display = 'none';
-    }
-
-    // Сохранение в LocalStorage + Рассылка всем игрокам
     function saveAndBroadcast() {
         if (!isHost) return;
-
-        // Автосохранение
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            roomId: roomId,
-            gameState: gameState
-        }));
-
-        // Рассылка по WebRTC
-        Object.values(connections).forEach(conn => {
-            if (conn.open) {
-                conn.send({ type: 'STATE_UPDATE', state: gameState });
-            }
-        });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ roomId, gameState }));
+        sendState(gameState); // Отправка всем
     }
 
-    // Загрузка фоновой карты
     document.getElementById('map-input').addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -238,8 +169,7 @@
         reader.readAsDataURL(file);
     });
 
-    // Добавление игрока
-    function addPlayer() {
+    document.getElementById('add-player-btn').addEventListener('click', () => {
         const nameInput = document.getElementById('new-player-name');
         const avatarInput = document.getElementById('new-player-avatar');
         const name = nameInput.value.trim();
@@ -259,41 +189,39 @@
         renderHostPlayerList();
         saveAndBroadcast();
         renderBoard();
-    }
+    });
 
-    // Удаление игрока
-    function removePlayer(name) {
-        delete gameState.tokens[name];
-        if (connections[name]) delete connections[name];
-        renderHostPlayerList();
-        saveAndBroadcast();
-        renderBoard();
-    }
-
-    // Генерация индивидуальной ссылки игрока
-    function getPlayerLink(name) {
-        return `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
-    }
-
-    // Функция генерации и копирования ВСЕХ ссылок разом
-    function copyAllLinks() {
+    document.getElementById('copy-all-btn').addEventListener('click', () => {
         const players = Object.keys(gameState.tokens);
-        if (players.length === 0) {
-            alert('Список игроков пуст! Сначала добавьте игроков.');
-            return;
-        }
+        if (players.length === 0) return alert('Добавьте игроков!');
 
         let text = `🎲 Ссылки для входа на карту:\n\n`;
         players.forEach(name => {
-            text += `👤 **${name}**: ${getPlayerLink(name)}\n`;
+            const link = `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
+            text += `👤 ${name}: ${link}\n`;
         });
 
-        navigator.clipboard.writeText(text).then(() => {
-            alert('Все ссылки скопированы в буфер обмена! Вы можете вставить их в рабочий чат.');
-        });
-    }
+        navigator.clipboard.writeText(text).then(() => alert('Все ссылки скопированы!'));
+    });
 
-    // Отрисовка списка игроков в меню Ведущего
+    document.getElementById('restore-btn')?.addEventListener('click', () => {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (saved) {
+            roomId = saved.roomId;
+            gameState = saved.gameState;
+            window.location.hash = `room=${roomId}`;
+            document.getElementById('restore-banner').style.display = 'none';
+            renderHostPlayerList();
+            renderBoard();
+            sendState(gameState);
+        }
+    });
+
+    document.getElementById('clear-btn')?.addEventListener('click', () => {
+        localStorage.removeItem(STORAGE_KEY);
+        document.getElementById('restore-banner').style.display = 'none';
+    });
+
     function renderHostPlayerList() {
         const container = document.getElementById('players-list');
         container.innerHTML = '';
@@ -301,26 +229,37 @@
         Object.entries(gameState.tokens).forEach(([name, tokenData]) => {
             const div = document.createElement('div');
             div.className = 'player-row';
+            const link = `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
+
             div.innerHTML = `
           <strong>${name}</strong>
-          <input type="text" placeholder="URL Аватарки" value="${tokenData.avatar || ''}"
-                 onchange="updateAvatar('${name}', this.value)" style="width: 180px;">
-          <button class="secondary" onclick="navigator.clipboard.writeText('${getPlayerLink(name)}')">Ссылка</button>
-          <button class="danger" onclick="removePlayer('${name}')">✕</button>
+          <input type="text" placeholder="URL Аватарки" value="${tokenData.avatar || ''}" class="avatar-edit" style="width: 180px;">
+          <button class="secondary copy-single-btn">Ссылка</button>
+          <button class="danger delete-btn">✕</button>
         `;
+
+            div.querySelector('.avatar-edit').addEventListener('change', (e) => {
+                gameState.tokens[name].avatar = e.target.value.trim() || null;
+                saveAndBroadcast();
+                renderBoard();
+            });
+
+            div.querySelector('.copy-single-btn').addEventListener('click', () => {
+                navigator.clipboard.writeText(link);
+            });
+
+            div.querySelector('.delete-btn').addEventListener('click', () => {
+                delete gameState.tokens[name];
+                renderHostPlayerList();
+                saveAndBroadcast();
+                renderBoard();
+            });
+
             container.appendChild(div);
         });
     }
 
-    function updateAvatar(name, newUrl) {
-        if (gameState.tokens[name]) {
-            gameState.tokens[name].avatar = newUrl.trim() || null;
-            saveAndBroadcast();
-            renderBoard();
-        }
-    }
-
-    // --- РЕНДЕРИНГ И ДВИЖЕНИЕ ФИШЕК ---
+    // --- РЕНДЕРИНГ И ДВИЖЕНИЕ ---
 
     function renderBoard() {
         const board = document.getElementById('board');
@@ -341,7 +280,6 @@
             const token = document.createElement('div');
             token.className = 'token';
 
-            // Установка аватарки или первых букв имени
             if (pos.avatar) {
                 token.style.backgroundImage = `url(${pos.avatar})`;
                 token.innerText = '';
@@ -349,7 +287,6 @@
                 token.innerText = name.substring(0, 2).toUpperCase();
             }
 
-            // Подпись имени снизу фишки
             const label = document.createElement('div');
             label.className = 'token-label';
             label.innerText = name;
@@ -403,18 +340,20 @@
             isDragging = false;
             element.style.cursor = 'grab';
 
+            // Отправляем перемещение
+            sendMove({
+                name: playerName,
+                x: gameState.tokens[playerName].x,
+                y: gameState.tokens[playerName].y
+            });
+
             if (isHost) {
                 saveAndBroadcast();
-            } else {
-                hostConn.send({
-                    type: 'MOVE',
-                    name: playerName,
-                    x: gameState.tokens[playerName].x,
-                    y: gameState.tokens[playerName].y
-                });
             }
         });
     }
 </script>
 </body>
 </html>
+
+
