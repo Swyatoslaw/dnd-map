@@ -93,6 +93,10 @@ list), **3. Комната** (recreate). The restore banner sits above them all.
   field ("Ссылка на аватарку"), `📁`, "Ссылка для входа" (copies the player's
   invite link) and delete. A file-based avatar shows the placeholder
   "Аватарка из файла" instead of the huge DataURL.
+- Narrow screens (`@media (max-width: 700px)`): rows stack instead of squeezing
+  into one line — name on its own line, the URL field full width, the buttons
+  on a line below (36px min height for touch). Field widths live in CSS, not
+  inline `style`, so the breakpoint can override them.
 - Generate per-player links; "copy all links" button.
 - Autosave the full session (map, tokens, avatars) to `localStorage` and a
   **restore banner** to resume a previous game on reload (rejoins the saved
