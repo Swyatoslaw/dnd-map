@@ -346,9 +346,12 @@
 
         if (!name || gameState.tokens[name]) return;
 
+        // Новую фишку тоже ставим внутри карты
+        const start = clampToBoard(50 + Object.keys(gameState.tokens).length * 20, 50);
+
         gameState.tokens[name] = {
-            x: 50 + Object.keys(gameState.tokens).length * 20,
-            y: 50,
+            x: start.x,
+            y: start.y,
             avatar: avatar || null
         };
 
@@ -563,6 +566,27 @@
     // Экранирование для подстановки в css url("...")
     const cssUrl = (src) => String(src).replace(/["\\]/g, '\\$&');
 
+    // Фишка не должна уезжать за границы карты
+    function clampToBoard(x, y, size = 60) {
+        const maxX = Math.max(0, board.offsetWidth - size);
+        const maxY = Math.max(0, board.offsetHeight - size);
+        return { x: clamp(x, 0, maxX), y: clamp(y, 0, maxY) };
+    }
+
+    // После смены карты (другой размер) возвращаем уехавшие фишки внутрь
+    function clampAllTokens() {
+        let changed = false;
+        Object.values(gameState.tokens).forEach(pos => {
+            const p = clampToBoard(pos.x, pos.y);
+            if (p.x !== pos.x || p.y !== pos.y) {
+                pos.x = p.x;
+                pos.y = p.y;
+                changed = true;
+            }
+        });
+        return changed;
+    }
+
     function renderBoard() {
         const board = document.getElementById('board');
         // Кавычки обязательны: в обычных URL бывают скобки и пробелы, которые ломают css url(...)
@@ -574,6 +598,11 @@
             img.onload = () => {
                 board.style.width = img.width + 'px';
                 board.style.height = img.height + 'px';
+                // Размер поля известен только сейчас — подтягиваем фишки внутрь новых границ
+                if (isHost && clampAllTokens()) {
+                    saveAndBroadcast();
+                    renderBoard();
+                }
             };
         } else {
             board.style.width = '';
@@ -636,8 +665,10 @@
             const dx = (e.clientX - startX) / boardScale;
             const dy = (e.clientY - startY) / boardScale;
 
-            const newX = initialLeft + dx;
-            const newY = initialTop + dy;
+            // Не даем вытащить фишку за пределы карты
+            const { x: newX, y: newY } = clampToBoard(
+                initialLeft + dx, initialTop + dy, element.offsetWidth
+            );
 
             element.style.left = newX + 'px';
             element.style.top = newY + 'px';

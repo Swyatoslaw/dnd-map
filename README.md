@@ -107,6 +107,14 @@ paste into a group chat.
 - Can drag **only their own** token (the one whose name matches `player` in the
   URL). Other tokens are shown `.disabled`.
 
+### Token bounds
+- Tokens are clamped to the board while dragging: `x` in `[0, boardWidth - 60]`,
+  `y` in `[0, boardHeight - 60]` (board size = the map image's natural size, or
+  the 500×500 CSS minimum when there's no map). Clamping happens on the
+  dragger's own client, before the position is broadcast.
+- New tokens are placed inside the bounds, and when the map image loads at a
+  different size the host pulls stray tokens back in and re-broadcasts.
+
 ### Map view — zoom & pan (works on desktop + mobile)
 - On-screen buttons (bottom-right): `−` / `+` / `⟲` reset + live % readout.
 - Mouse wheel zoom (anchored to cursor).
