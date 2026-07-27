@@ -72,6 +72,10 @@ paste into a group chat.
 ## Features
 
 ### Host (GM)
+The panel is split into three `.section` cards: **1. Картинка карты**,
+**2. Игроки и аватарки** (with "copy all links" at the top, above the player
+list), **3. Комната** (recreate). The restore banner sits above them all.
+
 - Set the map background two ways, both stored in `gameState.bgImage`:
   - **local file** (`<input type="file">` → `FileReader` → DataURL), or
   - **direct image URL** pasted into the URL field (Enter or "Загрузить по

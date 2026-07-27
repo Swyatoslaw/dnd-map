@@ -27,6 +27,14 @@
         }
 
         .player-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; background: #18181b; padding: 8px; border-radius: 6px; }
+
+        /* Смысловые группы настроек ведущего */
+        .section { background: #1f1f23; border: 1px solid #3f3f46; border-radius: 8px; padding: 14px; margin-top: 12px; }
+        .section > h4 {
+            margin: 0 0 12px; font-size: 12px; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.06em; color: #a1a1aa;
+        }
+
         input[type="text"] { padding: 6px 10px; border-radius: 4px; border: 1px solid #52525b; background: #09090b; color: #fff; }
         button { padding: 6px 12px; border-radius: 4px; border: none; background: #5a8af5; color: #fff; cursor: pointer; font-weight: 500; }
         button:hover { background: #5478e4; }
@@ -118,31 +126,42 @@
         <button class="danger" id="clear-btn">Начать заново</button>
     </div>
 
-    <h4 style="margin-bottom: 8px;">1. Картинка карты:</h4>
-    <div class="controls-group">
-        <label>Файл: <input type="file" id="map-input" accept="image/*"></label>
-        <span style="color:#a1a1aa;">или</span>
-        <input type="text" id="map-url" placeholder="URL картинки (https://...)" style="width: 280px;">
-        <button class="secondary" id="map-url-btn">Загрузить по ссылке</button>
-        <button class="secondary" id="map-clear-btn" title="Убрать карту">✕</button>
-    </div>
-    <div id="map-note" style="display:none; margin-top:8px; font-size:13px;"></div>
+    <!-- 1. Карта -->
+    <section class="section">
+        <h4>1. Картинка карты</h4>
+        <div class="controls-group">
+            <label>Файл: <input type="file" id="map-input" accept="image/*"></label>
+            <span style="color:#a1a1aa;">или</span>
+            <input type="text" id="map-url" placeholder="URL картинки (https://...)" style="width: 280px;">
+            <button class="secondary" id="map-url-btn">Загрузить по ссылке</button>
+            <button class="secondary" id="map-clear-btn" title="Убрать карту">✕</button>
+        </div>
+        <div id="map-note" style="display:none; margin-top:8px; font-size:13px;"></div>
+    </section>
 
-    <div class="controls-group" style="margin-top: 12px;">
-        <button class="secondary" id="copy-all-btn">📋 Скопировать ссылки для ВСЕХ</button>
-        <button class="danger" id="recreate-room-btn" title="Создать новую комнату, сохранив карту, аватарки и позиции">🔄 Пересоздать комнату</button>
-    </div>
+    <!-- 2. Игроки -->
+    <section class="section">
+        <h4>2. Игроки и аватарки</h4>
+        <div class="controls-group" style="margin-bottom: 10px;">
+            <button class="secondary" id="copy-all-btn">📋 Скопировать ссылки для ВСЕХ</button>
+        </div>
+        <div id="players-list"></div>
+        <div class="controls-group" style="margin-top: 12px;">
+            <input type="text" id="new-player-name" placeholder="Имя игрока">
+            <input type="text" id="new-player-avatar" placeholder="URL аватарки">
+            <button id="add-player-btn">Добавить игрока</button>
+        </div>
+    </section>
 
-    <div id="recreate-note" style="display:none; background:#3f3f46; padding:10px; border-radius:6px; margin-top:12px;"></div>
-
-    <h4 style="margin-bottom: 8px;">2. Игроки и аватарки:</h4>
-    <div id="players-list"></div>
-    <br>
-    <div class="controls-group">
-        <input type="text" id="new-player-name" placeholder="Имя игрока">
-        <input type="text" id="new-player-avatar" placeholder="URL аватарки">
-        <button id="add-player-btn">Добавить игрока</button>
-    </div>
+    <!-- 3. Комната -->
+    <section class="section">
+        <h4>3. Комната</h4>
+        <div class="controls-group">
+            <button class="danger" id="recreate-room-btn" title="Создать новую комнату, сохранив карту, аватарки и позиции">🔄 Пересоздать комнату</button>
+            <span style="color:#a1a1aa; font-size:13px;">Если игроки перестали подключаться</span>
+        </div>
+        <div id="recreate-note" style="display:none; background:#3f3f46; padding:10px; border-radius:6px; margin-top:12px;"></div>
+    </section>
 </div>
 
 <!-- Статус Игрока -->
@@ -468,16 +487,39 @@
             const link = playerLink(name);
 
             div.innerHTML = `
-          <strong>${name}</strong>
-          <input type="text" placeholder="URL Аватарки" value="${tokenData.avatar || ''}" class="avatar-edit" style="width: 180px;">
+          <strong class="player-name"></strong>
+          <input type="text" placeholder="URL аватарки" class="avatar-edit" style="width: 200px;">
+          <label class="file-btn" title="Выбрать файл аватарки">📁<input type="file" accept="image/*" class="avatar-file"></label>
           <button class="secondary copy-single-btn">Ссылка</button>
           <button class="danger delete-btn">✕</button>
         `;
 
-            div.querySelector('.avatar-edit').addEventListener('change', (e) => {
-                gameState.tokens[name].avatar = e.target.value.trim() || null;
+            div.querySelector('.player-name').innerText = name;
+
+            const avatarInput = div.querySelector('.avatar-edit');
+            // DataURL из файла в поле не показываем — он огромный
+            if (tokenData.avatar?.startsWith('data:')) {
+                avatarInput.placeholder = 'Аватарка из файла';
+            } else {
+                avatarInput.value = tokenData.avatar || '';
+            }
+
+            function setAvatar(src) {
+                gameState.tokens[name].avatar = src;
                 saveAndBroadcast();
                 renderBoard();
+            }
+
+            avatarInput.addEventListener('change', (e) => {
+                setAvatar(e.target.value.trim() || null);
+            });
+
+            div.querySelector('.avatar-file').addEventListener('change', (e) => {
+                readImageFile(e.target.files[0], (dataUrl) => {
+                    avatarInput.value = '';
+                    avatarInput.placeholder = 'Аватарка из файла';
+                    setAvatar(dataUrl);
+                });
             });
 
             div.querySelector('.copy-single-btn').addEventListener('click', () => {
