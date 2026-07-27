@@ -35,6 +35,29 @@
         button.danger { background: #dc2626; }
         button.danger:hover { background: #b91c1c; }
         .controls-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+        /* Область просмотра карты с зумом/панорамированием */
+        #board-wrap {
+            position: relative; width: 100%; height: 72vh; overflow: hidden;
+            border: 2px solid #3f3f46; border-radius: 8px; background: #0b0b0d;
+            touch-action: none; /* сами обрабатываем жесты pan/pinch */
+        }
+        #board { transform-origin: 0 0; will-change: transform; }
+
+        #zoom-controls {
+            position: fixed; right: 16px; bottom: 16px; z-index: 50;
+            display: flex; gap: 6px; background: rgba(39,39,42,0.9);
+            padding: 8px; border-radius: 10px; border: 1px solid #3f3f46;
+            backdrop-filter: blur(4px);
+        }
+        #zoom-controls button {
+            width: 42px; height: 42px; font-size: 20px; line-height: 1;
+            display: flex; align-items: center; justify-content: center; padding: 0;
+        }
+        #zoom-level {
+            min-width: 52px; display: flex; align-items: center; justify-content: center;
+            font-size: 13px; color: #a1a1aa;
+        }
     </style>
 
     <!-- Импорт Trystero (модуль Nostr) -->
@@ -78,7 +101,16 @@
     <h3 id="status">Подключение к P2P сети...</h3>
 </div>
 
-<div id="board"></div>
+<div id="board-wrap">
+    <div id="board"></div>
+</div>
+
+<div id="zoom-controls">
+    <button id="zoom-out" title="Отдалить">−</button>
+    <span id="zoom-level">100%</span>
+    <button id="zoom-in" title="Приблизить">+</button>
+    <button id="zoom-reset" class="secondary" title="Сбросить" style="font-size:16px;">⟲</button>
+</div>
 
 <script type="module">
     import { joinRoom } from 'trystero';
@@ -260,6 +292,99 @@
         });
     }
 
+    // --- ЗУМ И ПАНОРАМИРОВАНИЕ КАРТЫ ---
+
+    const boardWrap = document.getElementById('board-wrap');
+    const board = document.getElementById('board');
+    let boardScale = 1, panX = 0, panY = 0;
+    const MIN_SCALE = 0.15, MAX_SCALE = 5;
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+    function applyTransform() {
+        board.style.transform = `translate(${panX}px, ${panY}px) scale(${boardScale})`;
+        document.getElementById('zoom-level').innerText = Math.round(boardScale * 100) + '%';
+    }
+
+    // Масштабирование с сохранением точки (clientX/clientY) под курсором/пальцами
+    function zoomTo(newScale, clientX, clientY) {
+        newScale = clamp(newScale, MIN_SCALE, MAX_SCALE);
+        const rect = boardWrap.getBoundingClientRect();
+        const cx = clientX - rect.left, cy = clientY - rect.top;
+        const k = newScale / boardScale;
+        panX = cx - k * (cx - panX);
+        panY = cy - k * (cy - panY);
+        boardScale = newScale;
+        applyTransform();
+    }
+
+    function zoomBy(factor, clientX, clientY) {
+        // По умолчанию — относительно центра области просмотра
+        const rect = boardWrap.getBoundingClientRect();
+        zoomTo(boardScale * factor, clientX ?? rect.left + rect.width / 2, clientY ?? rect.top + rect.height / 2);
+    }
+
+    document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1.25));
+    document.getElementById('zoom-out').addEventListener('click', () => zoomBy(1 / 1.25));
+    document.getElementById('zoom-reset').addEventListener('click', () => {
+        boardScale = 1; panX = 0; panY = 0; applyTransform();
+    });
+
+    // Колесо мыши — зум к позиции курсора
+    boardWrap.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        zoomTo(boardScale * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX, e.clientY);
+    }, { passive: false });
+
+    // Жесты: панорамирование одним пальцем/мышью по фону, зум щипком двумя пальцами
+    const pointers = new Map();
+    let panning = false, panStart = null, pinchDist0 = 0, pinchScale0 = 1;
+
+    boardWrap.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.token')) return; // по фишке — работает перетаскивание, не панорама
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        boardWrap.setPointerCapture(e.pointerId);
+        if (pointers.size === 1) {
+            panning = true;
+            panStart = { x: e.clientX, y: e.clientY, panX, panY };
+        } else if (pointers.size === 2) {
+            panning = false;
+            const [a, b] = [...pointers.values()];
+            pinchDist0 = Math.hypot(a.x - b.x, a.y - b.y);
+            pinchScale0 = boardScale;
+        }
+    });
+
+    boardWrap.addEventListener('pointermove', (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2) {
+            const [a, b] = [...pointers.values()];
+            const dist = Math.hypot(a.x - b.x, a.y - b.y);
+            if (pinchDist0 > 0) {
+                zoomTo(pinchScale0 * dist / pinchDist0, (a.x + b.x) / 2, (a.y + b.y) / 2);
+            }
+        } else if (panning) {
+            panX = panStart.panX + (e.clientX - panStart.x);
+            panY = panStart.panY + (e.clientY - panStart.y);
+            applyTransform();
+        }
+    });
+
+    const endPan = (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.delete(e.pointerId);
+        if (pointers.size === 1) {
+            // Остался один палец — продолжаем панорамирование от него
+            const [p] = [...pointers.values()];
+            panning = true;
+            panStart = { x: p.x, y: p.y, panX, panY };
+        } else if (pointers.size === 0) {
+            panning = false;
+        }
+    };
+    boardWrap.addEventListener('pointerup', endPan);
+    boardWrap.addEventListener('pointercancel', endPan);
+
     // --- РЕНДЕРИНГ И ДВИЖЕНИЕ ---
 
     function renderBoard() {
@@ -327,8 +452,9 @@
 
         element.addEventListener('pointermove', (e) => {
             if (!isDragging) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
+            // Экранное смещение делим на масштаб, чтобы фишка следовала за пальцем/курсором
+            const dx = (e.clientX - startX) / boardScale;
+            const dy = (e.clientY - startY) / boardScale;
 
             const newX = initialLeft + dx;
             const newY = initialTop + dy;
