@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>P2P Tabletop Map V2</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+        body { margin: 0; padding: 20px; background: #18181b; color: #f4f4f5; }
+        .panel { background: #27272a; padding: 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #3f3f46; }
+        #board { position: relative; border: 2px dashed #52525b; background-size: contain; background-repeat: no-repeat; display: inline-block; min-width: 500px; min-height: 500px; overflow: hidden; border-radius: 8px; }
+
+        /* Токен (фишка) */
+        .token {
+            position: absolute; width: 60px; height: 60px; border-radius: 50%;
+            border: 3px solid #60a5fa; cursor: grab; user-select: none;
+            display: flex; align-items: center; justify-content: center;
+            background: #3b82f6; font-weight: bold; font-size: 14px;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); background-size: cover; background-position: center;
+            transition: box-shadow 0.2s;
+        }
+        .token:hover { box-shadow: 0 0 15px #60a5fa; }
+        .token.disabled { cursor: not-allowed; opacity: 0.7; filter: grayscale(40%); }
+        .token-label {
+            position: absolute; bottom: -22px; background: rgba(0,0,0,0.8);
+            padding: 2px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap;
+        }
+
+        .player-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; background: #18181b; padding: 8px; border-radius: 6px; }
+        input[type="text"] { padding: 6px 10px; border-radius: 4px; border: 1px solid #52525b; background: #09090b; color: #fff; }
+        button { padding: 6px 12px; border-radius: 4px; border: none; background: #2563eb; color: #fff; cursor: pointer; font-weight: 500; }
+        button:hover { background: #1d4ed8; }
+        button.secondary { background: #3f3f46; }
+        button.secondary:hover { background: #52525b; }
+        button.danger { background: #dc2626; }
+        button.danger:hover { background: #b91c1c; }
+        .controls-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+
+<!-- Панель управления Хоста -->
+<div id="host-controls" class="panel" style="display: none;">
+    <h2>Панель Ведущего</h2>
+
+    <div id="restore-banner" style="display:none; background:#3f3f46; padding:10px; border-radius:6px; margin-bottom:12px;">
+        Обнаружена сохраненная игра!
+        <button onclick="restoreSession()">Возобновить прошлую игру</button>
+        <button class="danger" onclick="clearSavedSession()">Начать заново</button>
+    </div>
+
+    <div class="controls-group">
+        <label>1. Картинка карты: <input type="file" id="map-input" accept="image/*"></label>
+        <button class="secondary" onclick="copyAllLinks()">📋 Скопировать ссылки для ВСЕХ</button>
+    </div>
+
+    <h4 style="margin-bottom: 8px;">2. Игроки и их аватарки:</h4>
+    <div id="players-list"></div>
+    <br>
+    <div class="controls-group">
+        <input type="text" id="new-player-name" placeholder="Имя игрока">
+        <input type="text" id="new-player-avatar" placeholder="URL аватарки (необязательно)">
+        <button onclick="addPlayer()">Добавить игрока</button>
+    </div>
+</div>
+
+<!-- Статус подключения для Игрока -->
+<div id="client-controls" class="panel" style="display: none;">
+    <h3 id="status">Соединение с хостом...</h3>
+</div>
+
+<!-- Игровое поле -->
+<div id="board"></div>
+
+<script>
+    let peer = null;
+    let connections = {};
+    let hostConn = null;
+    let isHost = false;
+    let myPlayerName = null;
+    let roomId = null;
+
+    const STORAGE_KEY = 'p2p_tabletop_state';
+
+    // Состояние игры
+    let gameState = {
+        bgImage: null,
+        tokens: {} // { "Имя": { x: 100, y: 100, avatar: "URL" } }
+    };
+
+    const urlParams = new URLSearchParams(window.location.hash.substring(1));
+    roomId = urlParams.get('room');
+    myPlayerName = urlParams.get('player');
+
+    // --- ИНИЦИАЛИЗАЦИЯ ---
+
+    if (!roomId) {
+        // РЕЖИМ ХОСТА
+        isHost = true;
+        document.getElementById('host-controls').style.display = 'block';
+
+        // Проверка прошлых сохранений
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (savedData) {
+            document.getElementById('restore-banner').style.display = 'block';
+        }
+
+        // Если сохранений нет — генерируем новый ID
+        if (!roomId) {
+            roomId = 'room-' + Math.random().toString(36).substring(2, 9);
+            window.location.hash = `room=${roomId}`;
+        }
+
+        initHostPeer();
+
+    } else {
+        // РЕЖИМ ИГРОКА
+        document.getElementById('client-controls').style.display = 'block';
+        peer = new Peer();
+
+        peer.on('open', () => {
+            hostConn = peer.connect(roomId);
+
+            hostConn.on('open', () => {
+                document.getElementById('status').innerText = `Игра: ${roomId} | Вы зашли как: ${myPlayerName}`;
+                hostConn.send({ type: 'JOIN', name: myPlayerName });
+            });
+
+            hostConn.on('data', data => {
+                if (data.type === 'STATE_UPDATE') {
+                    gameState = data.state;
+                    renderBoard();
+                }
+            });
+
+            hostConn.on('close', () => {
+                document.getElementById('status').innerText = 'Соединение с хостом потеряно!';
+            });
+        });
+    }
+
+    function initHostPeer() {
+        if (peer) peer.destroy();
+        peer = new Peer(roomId);
+
+        peer.on('open', id => console.log('Комната готова. ID:', id));
+
+        peer.on('connection', conn => {
+            conn.on('open', () => {
+                conn.on('data', data => {
+                    if (data.type === 'JOIN') {
+                        connections[data.name] = conn;
+                        conn.send({ type: 'STATE_UPDATE', state: gameState });
+                    }
+                    if (data.type === 'MOVE') {
+                        if (gameState.tokens[data.name]) {
+                            gameState.tokens[data.name].x = data.x;
+                            gameState.tokens[data.name].y = data.y;
+                            saveAndBroadcast();
+                            renderBoard();
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    // --- ФУНКЦИИ ХОСТА ---
+
+    // Восстановление прошлых данных из LocalStorage
+    function restoreSession() {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        if (saved) {
+            roomId = saved.roomId;
+            gameState = saved.gameState;
+            window.location.hash = `room=${roomId}`;
+
+            document.getElementById('restore-banner').style.display = 'none';
+            initHostPeer();
+            renderHostPlayerList();
+            renderBoard();
+        }
+    }
+
+    function clearSavedSession() {
+        localStorage.removeItem(STORAGE_KEY);
+        document.getElementById('restore-banner').style.display = 'none';
+    }
+
+    // Сохранение в LocalStorage + Рассылка всем игрокам
+    function saveAndBroadcast() {
+        if (!isHost) return;
+
+        // Автосохранение
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            roomId: roomId,
+            gameState: gameState
+        }));
+
+        // Рассылка по WebRTC
+        Object.values(connections).forEach(conn => {
+            if (conn.open) {
+                conn.send({ type: 'STATE_UPDATE', state: gameState });
+            }
+        });
+    }
+
+    // Загрузка фоновой карты
+    document.getElementById('map-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            gameState.bgImage = event.target.result;
+            saveAndBroadcast();
+            renderBoard();
+        };
+        reader.readAsDataURL(file);
+    });
+
+    // Добавление игрока
+    function addPlayer() {
+        const nameInput = document.getElementById('new-player-name');
+        const avatarInput = document.getElementById('new-player-avatar');
+        const name = nameInput.value.trim();
+        const avatar = avatarInput.value.trim();
+
+        if (!name || gameState.tokens[name]) return;
+
+        gameState.tokens[name] = {
+            x: 50 + Object.keys(gameState.tokens).length * 20,
+            y: 50,
+            avatar: avatar || null
+        };
+
+        nameInput.value = '';
+        avatarInput.value = '';
+
+        renderHostPlayerList();
+        saveAndBroadcast();
+        renderBoard();
+    }
+
+    // Удаление игрока
+    function removePlayer(name) {
+        delete gameState.tokens[name];
+        if (connections[name]) delete connections[name];
+        renderHostPlayerList();
+        saveAndBroadcast();
+        renderBoard();
+    }
+
+    // Генерация индивидуальной ссылки игрока
+    function getPlayerLink(name) {
+        return `${window.location.origin}${window.location.pathname}#room=${roomId}&player=${encodeURIComponent(name)}`;
+    }
+
+    // Функция генерации и копирования ВСЕХ ссылок разом
+    function copyAllLinks() {
+        const players = Object.keys(gameState.tokens);
+        if (players.length === 0) {
+            alert('Список игроков пуст! Сначала добавьте игроков.');
+            return;
+        }
+
+        let text = `🎲 Ссылки для входа на карту:\n\n`;
+        players.forEach(name => {
+            text += `👤 **${name}**: ${getPlayerLink(name)}\n`;
+        });
+
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Все ссылки скопированы в буфер обмена! Вы можете вставить их в рабочий чат.');
+        });
+    }
+
+    // Отрисовка списка игроков в меню Ведущего
+    function renderHostPlayerList() {
+        const container = document.getElementById('players-list');
+        container.innerHTML = '';
+
+        Object.entries(gameState.tokens).forEach(([name, tokenData]) => {
+            const div = document.createElement('div');
+            div.className = 'player-row';
+            div.innerHTML = `
+          <strong>${name}</strong>
+          <input type="text" placeholder="URL Аватарки" value="${tokenData.avatar || ''}"
+                 onchange="updateAvatar('${name}', this.value)" style="width: 180px;">
+          <button class="secondary" onclick="navigator.clipboard.writeText('${getPlayerLink(name)}')">Ссылка</button>
+          <button class="danger" onclick="removePlayer('${name}')">✕</button>
+        `;
+            container.appendChild(div);
+        });
+    }
+
+    function updateAvatar(name, newUrl) {
+        if (gameState.tokens[name]) {
+            gameState.tokens[name].avatar = newUrl.trim() || null;
+            saveAndBroadcast();
+            renderBoard();
+        }
+    }
+
+    // --- РЕНДЕРИНГ И ДВИЖЕНИЕ ФИШЕК ---
+
+    function renderBoard() {
+        const board = document.getElementById('board');
+        board.style.backgroundImage = gameState.bgImage ? `url(${gameState.bgImage})` : 'none';
+
+        if (gameState.bgImage) {
+            const img = new Image();
+            img.src = gameState.bgImage;
+            img.onload = () => {
+                board.style.width = img.width + 'px';
+                board.style.height = img.height + 'px';
+            };
+        }
+
+        board.innerHTML = '';
+
+        Object.entries(gameState.tokens).forEach(([name, pos]) => {
+            const token = document.createElement('div');
+            token.className = 'token';
+
+            // Установка аватарки или первых букв имени
+            if (pos.avatar) {
+                token.style.backgroundImage = `url(${pos.avatar})`;
+                token.innerText = '';
+            } else {
+                token.innerText = name.substring(0, 2).toUpperCase();
+            }
+
+            // Подпись имени снизу фишки
+            const label = document.createElement('div');
+            label.className = 'token-label';
+            label.innerText = name;
+            token.appendChild(label);
+
+            token.style.left = pos.x + 'px';
+            token.style.top = pos.y + 'px';
+
+            const canMove = isHost || name === myPlayerName;
+
+            if (canMove) {
+                makeDraggable(token, name);
+            } else {
+                token.classList.add('disabled');
+            }
+
+            board.appendChild(token);
+        });
+    }
+
+    function makeDraggable(element, playerName) {
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+
+        element.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialLeft = element.offsetLeft;
+            initialTop = element.offsetTop;
+            element.style.cursor = 'grabbing';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+
+            const newX = initialLeft + dx;
+            const newY = initialTop + dy;
+
+            element.style.left = newX + 'px';
+            element.style.top = newY + 'px';
+
+            gameState.tokens[playerName].x = newX;
+            gameState.tokens[playerName].y = newY;
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            isDragging = false;
+            element.style.cursor = 'grab';
+
+            if (isHost) {
+                saveAndBroadcast();
+            } else {
+                hostConn.send({
+                    type: 'MOVE',
+                    name: playerName,
+                    x: gameState.tokens[playerName].x,
+                    y: gameState.tokens[playerName].y
+                });
+            }
+        });
+    }
+</script>
+</body>
+</html>
